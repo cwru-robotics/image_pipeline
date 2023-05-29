@@ -108,6 +108,7 @@ class ConsumerThread(threading.Thread):
 
 
 class CalibrationNode:
+
     def __init__(self, boards, service_check = True, synchronizer = message_filters.TimeSynchronizer, flags = 0,
                 fisheye_flags = 0, pattern=Patterns.Chessboard, camera_name='', checkerboard_flags = 0,
                 max_chessboard_speed = -1, queue_size = 1):
@@ -146,7 +147,6 @@ class CalibrationNode:
                                                                sensor_msgs.srv.SetCameraInfo)
         self.set_right_camera_info_service = rospy.ServiceProxy("%s/set_camera_info" % rospy.remap_name("right_camera"),
                                                                 sensor_msgs.srv.SetCameraInfo)
-
         self.q_mono = BufferQueue(queue_size)
         self.q_stereo = BufferQueue(queue_size)
 

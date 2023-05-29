@@ -46,6 +46,8 @@ import time
 from distutils.version import LooseVersion
 import sys
 from enum import Enum
+import os
+import numpy.random
 
 # Supported camera models
 class CAMERA_MODEL(Enum):
@@ -201,6 +203,7 @@ def _get_corners(img, board, refine = True, checkerboard_flags=0):
         mono = img
     (ok, corners) = cv2.findChessboardCorners(mono, (board.n_cols, board.n_rows), flags = cv2.CALIB_CB_ADAPTIVE_THRESH |
                                               cv2.CALIB_CB_NORMALIZE_IMAGE | checkerboard_flags)
+    
     if not ok:
         return (ok, corners)
 
@@ -226,6 +229,7 @@ def _get_corners(img, board, refine = True, checkerboard_flags=0):
             else:
                 corners=numpy.rot90(corners.reshape(board.n_rows,board.n_cols,2),3).reshape(board.n_cols*board.n_rows,1,2)
 
+    print("TOP SECTION")
     if refine and ok:
         # Use a radius of half the minimum distance between corners. This should be large enough to snap to the
         # correct corner, but not so large as to include a wrong corner in the search window.
@@ -241,6 +245,8 @@ def _get_corners(img, board, refine = True, checkerboard_flags=0):
         radius = int(math.ceil(min_distance * 0.5))
         cv2.cornerSubPix(mono, corners, (radius,radius), (-1,-1),
                                       ( cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.1 ))
+                                      
+        print("REFINEMENT IS HAPPENING\n\n")
 
     return (ok, corners)
 
@@ -284,7 +290,7 @@ def _get_circles(img, board, pattern):
     # TODO Better to add as second board? Corner ordering will change.
     if not ok and pattern == Patterns.Circles:
         (ok, corners) = cv2.findCirclesGrid(mono_arr, (board.n_rows, board.n_cols), flags=flag)
-
+    
     return (ok, corners)
 
 def _get_dist_model(dist_params, cam_model):
@@ -429,7 +435,7 @@ class Calibrator():
         d = min([param_distance(params, p) for p in db_params])
         #print "d = %.3f" % d #DEBUG
         # TODO What's a good threshold here? Should it be configurable?
-        if d <= 0.2:
+        if d <= 0.02:#TOM'S NOTES: Made this much less restrictive for testing purposes, as the system was only aquiring five or ten targets out of the set of 188. If I wanted to really gimp the calibration I would leave it the way it is, but I am here to test Zhang's algorithm, not ROS's somewhat dubious implementation of Zhang's algorithm.
             return False
 
         if self.max_chessboard_speed > 0:
@@ -459,7 +465,7 @@ class Calibrator():
         progress = [min((hi - lo) / r, 1.0) for (lo, hi, r) in zip(min_params, max_params, self.param_ranges)]
         # If we have lots of samples, allow calibration even if not all parameters are green
         # TODO Awkward that we update self.goodenough instead of returning it
-        self.goodenough = (len(self.db) >= 40) or all([p == 1.0 for p in progress])
+        self.goodenough = (len(self.db) >= 2) or all([p == 1.0 for p in progress])#TOM'S NOTES: I changed this so that it can calibrate with very small data sets.
 
         return list(zip(self._param_names, min_params, max_params, progress))
 
@@ -586,6 +592,8 @@ class Calibrator():
         print("K =", numpy.ravel(k).tolist())
         print("R =", numpy.ravel(r).tolist())
         print("P =", numpy.ravel(p).tolist())
+        
+        quit()# TOM'S NOTES: Die when we are done so that the script can continue.
 
     @staticmethod
     def lrost(name, d, k, r, p, size):
@@ -756,8 +764,38 @@ class MonoCalibrator(Calibrator):
 
 
         """
+        
+        #print("GET CIRCLE THINGY 1\n")
+    #print("INJECT ERROR HERE")
+    #sigma = float(os.environ["SIGMA"])
+    #print(sigma)
+    #print("\n\n\n")
+    
+    #print(corners)
+    #if ok:
+    #	for corner in corners:
+        	#print(corner)
+        	#print("through")
+     #   	increment = numpy.random.normal(0.0, sigma * 0.5, 2)
+        	#print(increment)
+        	#print("becomes")
+      #  	corner[0] += increment
+       		#print(corner)
+        	#print("\n\n\n")
+    
+    #print("Has become")
+    #print(corners)
 
         (ipts, ids, boards) = zip(*good)
+        
+        sigma = float(os.environ["SIGMA"])
+        print(sigma)
+        print("\n\n\n")
+        for board in ipts :
+           for point in board :
+              increment = numpy.random.normal(0.0, sigma * 0.5, 2)
+              point += increment
+              
         opts = self.mk_object_points(boards)
         # If FIX_ASPECT_RATIO flag set, enforce focal lengths have 1/1 ratio
         intrinsics_in = numpy.eye(3, dtype=numpy.float64)
@@ -771,6 +809,7 @@ class MonoCalibrator(Calibrator):
 
         elif self.camera_model == CAMERA_MODEL.PINHOLE:
             print("mono pinhole calibration...")
+            
             reproj_err, self.intrinsics, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
                        opts, ipts,
                        self.size,
@@ -780,6 +819,9 @@ class MonoCalibrator(Calibrator):
             # OpenCV returns more than 8 coefficients (the additional ones all zeros) when CALIB_RATIONAL_MODEL is set.
             # The extra ones include e.g. thin prism coefficients, which we are not interested in.
             self.distortion = dist_coeffs.flat[:8].reshape(-1, 1)
+            
+            
+            print("RPE is %f\n" % reproj_err)
         elif self.camera_model == CAMERA_MODEL.FISHEYE:
             print("mono fisheye calibration...")
             # WARNING: cv2.fisheye.calibrate wants float64 points
@@ -972,6 +1014,10 @@ class MonoCalibrator(Calibrator):
         else:
             scrib = cv2.cvtColor(scrib_mono, cv2.COLOR_GRAY2BGR)
             if corners is not None:
+                print("Pre-adding step")
+                
+                numpy.random.seed(len(self.db))
+                
                 # Draw (potentially downsampled) corners onto display image
                 if board.pattern == "charuco":
                     cv2.aruco.drawDetectedCornersCharuco(scrib, downsampled_corners, ids)
